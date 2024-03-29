@@ -36,20 +36,83 @@ const authorMachine = setup({
   types: {
     input: {} as AuthorDto,
     context: {} as AuthorDto,
+    events: {} as
+      | {
+          type: "editing.start";
+        }
+      | {
+          type: "editing.cancel";
+        }
+      | {
+          type: "editing.submit";
+        },
   },
 }).createMachine({
   id: "Author",
   context: ({ input }) => input,
+  initial: "Idle",
+  states: {
+    Idle: {
+      on: {
+        "editing.start": {
+          target: "Editing",
+        },
+      },
+    },
+    Editing: {
+      on: {
+        "editing.cancel": {
+          target: "Idle",
+        },
+      },
+    },
+  },
 });
 
 const quoteMachine = setup({
   types: {
     input: {} as QuoteDto,
     context: {} as QuoteDto,
+    events: {} as
+      | {
+          type: "editing.start";
+        }
+      | {
+          type: "editing.cancel";
+        }
+      | {
+          type: "editing.submit";
+          authorId: string;
+          text: string;
+        },
   },
 }).createMachine({
   id: "Quote",
   context: ({ input }) => input,
+  initial: "Idle",
+  states: {
+    Idle: {
+      on: {
+        "editing.start": {
+          target: "Editing",
+        },
+      },
+    },
+    Editing: {
+      on: {
+        "editing.cancel": {
+          target: "Idle",
+        },
+        "editing.submit": {
+          target: "Idle",
+          actions: assign({
+            author_id: ({ event }) => event.authorId,
+            text: ({ event }) => event.text,
+          }),
+        },
+      },
+    },
+  },
 });
 
 const appMachine = setup({
@@ -163,7 +226,9 @@ const appMachine = setup({
 });
 
 function App() {
-  const [snapshot] = useActor(appMachine);
+  const [snapshot] = useActor(appMachine, {
+    systemId: "App",
+  });
 
   return (
     <div className="h-full grid grid-rows-[auto,1fr] gap-y-4">
@@ -216,16 +281,123 @@ function QuoteItem({
   );
 
   return (
-    <div className="p-2 rounded bg-white shadow-md">
-      <p className="pl-2 border-l-4 border-green-600 mb-4">
-        {snapshot.context.text}
-      </p>
+    <CardItem>
+      {snapshot.matches("Idle") === true ? (
+        <>
+          <p className="pl-2 border-l-4 border-green-600 mb-4 text-gray-900">
+            {snapshot.context.text}
+          </p>
 
-      <p className="text-gray-600 text-sm">
-        {relatedAuthorState?.context.fullname ?? "-"}
-      </p>
-    </div>
+          <div className="grid grid-cols-[1fr,auto] gap-x-2">
+            <p className="text-gray-600 text-sm">
+              {relatedAuthorState?.context.fullname ?? "-"}
+            </p>
+
+            <button
+              className="text-green-800 text-sm font-semibold"
+              onClick={() => {
+                actorRef.send({
+                  type: "editing.start",
+                });
+              }}
+            >
+              Edit
+            </button>
+          </div>
+        </>
+      ) : (
+        <QuoteItemEditor
+          actorRef={actorRef}
+          defaultText={snapshot.context.text}
+          defaultAuthor={snapshot.context.author_id ?? undefined}
+        />
+      )}
+    </CardItem>
   );
+}
+
+function QuoteItemEditor({
+  actorRef,
+  defaultText,
+  defaultAuthor,
+}: {
+  actorRef: ActorRefFrom<typeof quoteMachine>;
+  defaultText: string;
+  defaultAuthor: string | undefined;
+}) {
+  const appActorRef = actorRef.system.get("App") as ActorRefFrom<
+    typeof appMachine
+  >;
+  const allAuthorRefs = useSelector(
+    appActorRef,
+    (state) => state.context.authors
+  );
+
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+
+        const formData = new FormData(event.currentTarget);
+
+        const authorId = formData.get("author");
+        invariant(typeof authorId === "string");
+
+        const text = formData.get("text");
+        invariant(typeof text === "string");
+
+        actorRef.send({
+          type: "editing.submit",
+          authorId,
+          text,
+        });
+      }}
+    >
+      <input
+        name="text"
+        defaultValue={defaultText}
+        className="border border-green-600 px-1 py-0.5 rounded mb-4 text-gray-900 w-full"
+      />
+
+      <select
+        name="author"
+        defaultValue={defaultAuthor}
+        className="mb-4 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600 sm:text-sm sm:leading-6"
+      >
+        {allAuthorRefs.map((authorRef) => {
+          const snapshot = authorRef.getSnapshot();
+
+          return (
+            <option key={authorRef.id} value={snapshot.context.id}>
+              {snapshot.context.fullname}
+            </option>
+          );
+        })}
+      </select>
+
+      <div className="flex justify-end gap-x-4">
+        <button
+          type="button"
+          className="text-green-800 text-sm font-semibold"
+          onClick={() => {
+            actorRef.send({
+              type: "editing.cancel",
+            });
+          }}
+        >
+          Cancel
+        </button>
+
+        <button type="submit" className="text-green-800 text-sm font-semibold">
+          Submit
+        </button>
+      </div>
+    </form>
+  );
+}
+
+function CardItem({ children }: { children: React.ReactNode }) {
+  return <div className="p-2 rounded bg-white shadow-md">{children}</div>;
 }
 
 export default App;
