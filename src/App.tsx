@@ -45,6 +45,8 @@ const authorMachine = setup({
         }
       | {
           type: "editing.submit";
+          fullname: string;
+          birthday: string;
         },
   },
 }).createMachine({
@@ -63,6 +65,13 @@ const authorMachine = setup({
       on: {
         "editing.cancel": {
           target: "Idle",
+        },
+        "editing.submit": {
+          target: "Idle",
+          actions: assign({
+            fullname: ({ event }) => event.fullname,
+            birth_date: ({ event }) => event.birthday,
+          }),
         },
       },
     },
@@ -150,11 +159,16 @@ const appMachine = setup({
           {
             id: "1",
             fullname: "XState fanboy",
-            birth_date: null,
+            birth_date: "2024-03-29T09:55:30.816Z",
           },
           {
             id: "2",
             fullname: "Redux lover",
+            birth_date: "2000-03-29T09:55:30.816Z",
+          },
+          {
+            id: "3",
+            fullname: "The nobody guy",
             birth_date: null,
           },
         ],
@@ -309,7 +323,7 @@ const appMachine = setup({
 });
 
 function App() {
-  const [snapshot, send, appActorRef] = useActor(appMachine, {
+  const [snapshot, , appActorRef] = useActor(appMachine, {
     systemId: "App",
   });
 
@@ -336,11 +350,21 @@ function App() {
             <QuoteNewItemEditor appActorRef={appActorRef} />
           </div>
         </div>
-        <div className="rounded-md bg-green-100">
-          <h2 className="text-center text-lg font-semibold">Authors</h2>
+        <div className="rounded-md bg-green-100 px-4 py-2 grid grid-rows-[auto,1fr]">
+          <h2 className="text-center text-lg font-semibold mb-2">Authors</h2>
+
+          <div className="overflow-y-auto space-y-2">
+            {snapshot.context.authors.map((author) => (
+              <AuthorItem key={author.id} actorRef={author} />
+            ))}
+          </div>
         </div>
-        <div className="rounded-md bg-green-100">
-          <h2 className="text-center text-lg font-semibold">Collections</h2>
+        <div className="rounded-md bg-green-100 px-4 py-2 grid grid-rows-[auto,1fr]">
+          <h2 className="text-center text-lg font-semibold mb-2">
+            Collections
+          </h2>
+
+          <div className="overflow-y-auto space-y-2"></div>
         </div>
       </div>
     </div>
@@ -440,6 +464,7 @@ function QuoteItemEditor({
     >
       <input
         name="text"
+        type="text"
         defaultValue={defaultText}
         className="border border-green-600 px-1 py-0.5 rounded mb-4 text-gray-900 w-full"
       />
@@ -525,6 +550,7 @@ function QuoteNewItemEditor({
           <p className="font-semibold text-sm mb-4 text-gray-900">New Quote</p>
 
           <input
+            type="text"
             name="text"
             placeholder="Text..."
             className="border border-green-600 px-1 py-0.5 rounded mb-4 text-gray-900 w-full"
@@ -594,6 +620,122 @@ function QuoteItemEditorAuthorOption({
   );
 
   return <option value={authorId}>{authorFullname}</option>;
+}
+
+function AuthorItem({
+  actorRef,
+}: {
+  actorRef: ActorRefFrom<typeof authorMachine>;
+}) {
+  const snapshot = useSelector(actorRef, (state) => state);
+
+  return (
+    <CardItem>
+      {snapshot.matches("Idle") === true ? (
+        <>
+          <p className="mb-2 text-gray-900">
+            {snapshot.context.fullname}{" "}
+            <span className="text-gray-500 text-sm">
+              (
+              {typeof snapshot.context.birth_date !== "string"
+                ? "-"
+                : new Intl.DateTimeFormat().format(
+                    new Date(snapshot.context.birth_date)
+                  )}
+              )
+            </span>
+          </p>
+
+          <div className="flex justify-end gap-x-2">
+            <button
+              className="text-green-800 text-sm font-semibold"
+              onClick={() => {
+                actorRef.send({
+                  type: "editing.start",
+                });
+              }}
+            >
+              Edit
+            </button>
+          </div>
+        </>
+      ) : (
+        <AuthorItemEditor
+          actorRef={actorRef}
+          defaultFullname={snapshot.context.fullname}
+          defaultBirthday={snapshot.context.birth_date ?? undefined}
+        />
+      )}
+    </CardItem>
+  );
+}
+
+function AuthorItemEditor({
+  actorRef,
+  defaultFullname,
+  defaultBirthday,
+}: {
+  actorRef: ActorRefFrom<typeof authorMachine>;
+  defaultFullname: string;
+  defaultBirthday: string | undefined;
+}) {
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+
+        const formData = new FormData(event.currentTarget);
+
+        const fullname = formData.get("fullname");
+        invariant(typeof fullname === "string");
+
+        const birthday = formData.get("birthday");
+        invariant(typeof birthday === "string");
+
+        actorRef.send({
+          type: "editing.submit",
+          fullname,
+          birthday,
+        });
+      }}
+    >
+      <input
+        type="text"
+        name="fullname"
+        defaultValue={defaultFullname}
+        className="border border-green-600 px-1 py-0.5 rounded mb-4 text-gray-900 w-full"
+      />
+
+      <input
+        type="date"
+        name="birthday"
+        defaultValue={
+          defaultBirthday === undefined
+            ? undefined
+            : new Date(defaultBirthday).toISOString().split("T")[0]
+        }
+        className="border border-green-600 px-1 py-0.5 rounded mb-4 text-gray-900 w-full"
+      />
+
+      <div className="flex justify-end gap-x-4">
+        <button
+          type="button"
+          className="text-green-800 text-sm font-semibold"
+          onClick={() => {
+            actorRef.send({
+              type: "editing.cancel",
+            });
+          }}
+        >
+          Cancel
+        </button>
+
+        <button type="submit" className="text-green-800 text-sm font-semibold">
+          Submit
+        </button>
+      </div>
+    </form>
+  );
 }
 
 function CardItem({ children }: { children: React.ReactNode }) {
