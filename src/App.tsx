@@ -121,6 +121,14 @@ const appMachine = setup({
       quotes: Array<ActorRefFrom<typeof quoteMachine>>;
       authors: Array<ActorRefFrom<typeof authorMachine>>;
     },
+    events: {} as
+      | { type: "quote.new.open" }
+      | { type: "quote.new.cancel" }
+      | {
+          type: "quote.new.submit";
+          text: string;
+          authorId: string;
+        },
   },
   actors: {
     authorMachine,
@@ -183,6 +191,9 @@ const appMachine = setup({
         collections: [],
       });
     }),
+    saveNewQuote: fromPromise<undefined, QuoteDto>(async () => {
+      await new Promise((res) => setTimeout(res, 1_000));
+    }),
   },
 }).createMachine({
   id: "App",
@@ -221,12 +232,84 @@ const appMachine = setup({
         },
       },
     },
-    Ready: {},
+    Ready: {
+      type: "parallel",
+      states: {
+        Quotes: {
+          initial: "Idle",
+          states: {
+            Idle: {
+              on: {
+                "quote.new.open": {
+                  target: "Creating",
+                },
+              },
+            },
+            Creating: {
+              initial: "Editing",
+              states: {
+                Editing: {
+                  on: {
+                    "quote.new.cancel": {
+                      target: "Done",
+                    },
+                    "quote.new.submit": {
+                      target: "Submitting",
+                      actions: assign({
+                        quotes: ({ context, event, spawn }) => {
+                          const newQuoteId = String(Math.random());
+
+                          return context.quotes.concat(
+                            spawn("quoteMachine", {
+                              id: getQuoteActorId(newQuoteId),
+                              input: {
+                                id: newQuoteId,
+                                author_id: event.authorId,
+                                collections_id: null,
+                                created_at: new Date().toISOString(),
+                                text: event.text,
+                              },
+                              systemId: getQuoteActorId(newQuoteId),
+                            })
+                          );
+                        },
+                      }),
+                    },
+                  },
+                },
+                Submitting: {
+                  invoke: {
+                    src: "saveNewQuote",
+                    input: ({ context }) => {
+                      const lastCreatedQuote = context.quotes
+                        .at(-1)
+                        ?.getSnapshot().context;
+                      invariant(lastCreatedQuote !== undefined);
+
+                      return lastCreatedQuote;
+                    },
+                    onDone: {
+                      target: "Done",
+                    },
+                  },
+                },
+                Done: {
+                  type: "final",
+                },
+              },
+              onDone: {
+                target: "Idle",
+              },
+            },
+          },
+        },
+      },
+    },
   },
 });
 
 function App() {
-  const [snapshot] = useActor(appMachine, {
+  const [snapshot, send, appActorRef] = useActor(appMachine, {
     systemId: "App",
   });
 
@@ -249,6 +332,8 @@ function App() {
             {snapshot.context.quotes.map((quote) => (
               <QuoteItem key={quote.id} actorRef={quote} />
             ))}
+
+            <QuoteNewItemEditor appActorRef={appActorRef} />
           </div>
         </div>
         <div className="rounded-md bg-green-100">
@@ -392,6 +477,108 @@ function QuoteItemEditor({
         </button>
       </div>
     </form>
+  );
+}
+
+function QuoteNewItemEditor({
+  appActorRef,
+}: {
+  appActorRef: ActorRefFrom<typeof appMachine>;
+}) {
+  const isCreatingNewQuote = useSelector(
+    appActorRef,
+    (state) => state.matches({ Ready: { Quotes: "Creating" } }) === true
+  );
+  const isSavingNewQuote = useSelector(
+    appActorRef,
+    (state) =>
+      state.matches({ Ready: { Quotes: { Creating: "Submitting" } } }) === true
+  );
+
+  const allAuthorRefs = useSelector(
+    appActorRef,
+    (state) => state.context.authors
+  );
+
+  return (
+    <CardItem>
+      {isCreatingNewQuote === true ? (
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+
+            const formData = new FormData(event.currentTarget);
+
+            const authorId = formData.get("author");
+            invariant(typeof authorId === "string");
+
+            const text = formData.get("text");
+            invariant(typeof text === "string");
+
+            appActorRef.send({
+              type: "quote.new.submit",
+              authorId,
+              text,
+            });
+          }}
+        >
+          <p className="font-semibold text-sm mb-4 text-gray-900">New Quote</p>
+
+          <input
+            name="text"
+            placeholder="Text..."
+            className="border border-green-600 px-1 py-0.5 rounded mb-4 text-gray-900 w-full"
+          />
+
+          <select
+            name="author"
+            className="mb-4 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600 sm:text-sm sm:leading-6"
+          >
+            {allAuthorRefs.map((authorRef) => {
+              return (
+                <QuoteItemEditorAuthorOption
+                  key={authorRef.id}
+                  authorRef={authorRef}
+                />
+              );
+            })}
+          </select>
+
+          <div className="flex justify-end gap-x-4">
+            <button
+              className="text-green-800 text-sm font-semibold"
+              onClick={() => {
+                appActorRef.send({
+                  type: "quote.new.cancel",
+                });
+              }}
+            >
+              Cancel
+            </button>
+
+            <button
+              type="submit"
+              className="text-green-800 text-sm font-semibold"
+            >
+              {isSavingNewQuote === true ? "Submitting" : "Submit"}
+            </button>
+          </div>
+        </form>
+      ) : (
+        <div className="flex">
+          <button
+            className="text-green-800 text-sm font-semibold m-auto"
+            onClick={() => {
+              appActorRef.send({
+                type: "quote.new.open",
+              });
+            }}
+          >
+            Add quote +
+          </button>
+        </div>
+      )}
+    </CardItem>
   );
 }
 
