@@ -1,4 +1,11 @@
-import { ActorRefFrom, assign, fromPromise, setup } from "xstate";
+import {
+  ActorRefFrom,
+  assign,
+  fromPromise,
+  sendParent,
+  setup,
+  stopChild,
+} from "xstate";
 import { Ok, Result } from "ts-results";
 import invariant from "tiny-invariant";
 import { useActor, useSelector } from "@xstate/react";
@@ -88,6 +95,7 @@ const quoteMachine = setup({
     input: {} as QuoteDto,
     context: {} as QuoteDto,
     events: {} as
+      | { type: "delete" }
       | {
           type: "editing.start";
         }
@@ -101,6 +109,13 @@ const quoteMachine = setup({
           collectionId: string | undefined;
         },
   },
+  actors: {
+    deleteQuoteFromServer: fromPromise<undefined, { quoteId: string }>(
+      async () => {
+        await new Promise((res) => setTimeout(res, 1_000));
+      }
+    ),
+  },
 }).createMachine({
   id: "Quote",
   context: ({ input }) => input,
@@ -110,6 +125,9 @@ const quoteMachine = setup({
       on: {
         "editing.start": {
           target: "Editing",
+        },
+        delete: {
+          target: "Deleting",
         },
       },
     },
@@ -127,6 +145,22 @@ const quoteMachine = setup({
           }),
         },
       },
+    },
+    Deleting: {
+      invoke: {
+        src: "deleteQuoteFromServer",
+        input: ({ context }) => ({ quoteId: context.id }),
+        onDone: {
+          target: "Done",
+          actions: sendParent(({ context }) => ({
+            type: "quote.delete.confirmed",
+            quoteId: context.id,
+          })),
+        },
+      },
+    },
+    Done: {
+      type: "final",
     },
   },
 });
@@ -182,6 +216,7 @@ const appMachine = setup({
       collections: Array<ActorRefFrom<typeof collectionMachine>>;
     },
     events: {} as
+      | { type: "quote.delete.confirmed"; quoteId: string }
       | { type: "quote.new.open" }
       | { type: "quote.new.cancel" }
       | {
@@ -460,6 +495,19 @@ const appMachine = setup({
           },
         },
       },
+      on: {
+        "quote.delete.confirmed": {
+          actions: [
+            stopChild(({ event }) => getQuoteActorId(event.quoteId)),
+            assign({
+              quotes: ({ context, event }) =>
+                context.quotes.filter(
+                  (quote) => quote.id !== getQuoteActorId(event.quoteId)
+                ),
+            }),
+          ],
+        },
+      },
     },
   },
 });
@@ -529,6 +577,8 @@ function QuoteItem({
 }) {
   const snapshot = useSelector(actorRef, (state) => state);
 
+  const isDeletingQuote = snapshot.matches("Deleting") === true;
+
   const relatedAuthorActorRef =
     snapshot.context.author_id === null
       ? undefined
@@ -553,7 +603,7 @@ function QuoteItem({
 
   return (
     <CardItem>
-      {snapshot.matches("Idle") === true ? (
+      {snapshot.matches("Editing") === false ? (
         <>
           <p className="pl-2 border-l-4 border-green-600 mb-4 text-gray-900">
             {snapshot.context.text}
@@ -571,7 +621,18 @@ function QuoteItem({
             )}
           </p>
 
-          <div className="flex justify-end gap-x-2">
+          <div className="flex justify-end gap-x-4">
+            <button
+              className="text-red-700 text-sm font-semibold"
+              onClick={() => {
+                actorRef.send({
+                  type: "delete",
+                });
+              }}
+            >
+              {isDeletingQuote === true ? "Deleting..." : "Delete"}
+            </button>
+
             <button
               className="text-green-800 text-sm font-semibold"
               onClick={() => {
@@ -860,7 +921,7 @@ function AuthorItem({
             </span>
           </p>
 
-          <div className="flex justify-end gap-x-2">
+          <div className="flex justify-end gap-x-4">
             <button
               className="text-green-800 text-sm font-semibold"
               onClick={() => {
@@ -983,8 +1044,6 @@ function AuthorNewItemEditor({
             const birthday = formData.get("birthday");
             invariant(typeof birthday === "string");
 
-            console.log({ birthday });
-
             appActorRef.send({
               type: "author.new.submit",
               fullname,
@@ -1059,7 +1118,7 @@ function CollectionItem({
         <>
           <p className="mb-2 text-gray-900">{snapshot.context.name}</p>
 
-          <div className="flex justify-end gap-x-2">
+          <div className="flex justify-end gap-x-4">
             <button
               className="text-green-800 text-sm font-semibold"
               onClick={() => {
