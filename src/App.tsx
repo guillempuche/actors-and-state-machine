@@ -3,6 +3,7 @@ import { Ok, Result } from "ts-results";
 import invariant from "tiny-invariant";
 import { useActor, useSelector } from "@xstate/react";
 import { ArrowPathIcon } from "@heroicons/react/24/outline";
+import { createBrowserInspector } from "@statelyai/inspect";
 
 interface QuoteDto {
   id: string;
@@ -463,9 +464,12 @@ const appMachine = setup({
   },
 });
 
+const inspector = createBrowserInspector();
+
 function App() {
   const [snapshot, , appActorRef] = useActor(appMachine, {
     systemId: "App",
+    inspect: inspector.inspect,
   });
 
   return (
