@@ -32,6 +32,10 @@ function getQuoteActorId(id: string) {
   return `quote-${id}`;
 }
 
+function getCollectionActorId(id: string) {
+  return `collection-${id}`;
+}
+
 const authorMachine = setup({
   types: {
     input: {} as AuthorDto,
@@ -124,11 +128,55 @@ const quoteMachine = setup({
   },
 });
 
+const collectionMachine = setup({
+  types: {
+    context: {} as CollectionDto,
+    input: {} as CollectionDto,
+    events: {} as
+      | {
+          type: "editing.start";
+        }
+      | {
+          type: "editing.cancel";
+        }
+      | {
+          type: "editing.submit";
+          name: string;
+        },
+  },
+}).createMachine({
+  context: ({ input }) => input,
+  initial: "Idle",
+  states: {
+    Idle: {
+      on: {
+        "editing.start": {
+          target: "Editing",
+        },
+      },
+    },
+    Editing: {
+      on: {
+        "editing.cancel": {
+          target: "Idle",
+        },
+        "editing.submit": {
+          target: "Idle",
+          actions: assign({
+            name: ({ event }) => event.name,
+          }),
+        },
+      },
+    },
+  },
+});
+
 const appMachine = setup({
   types: {
     context: {} as {
       quotes: Array<ActorRefFrom<typeof quoteMachine>>;
       authors: Array<ActorRefFrom<typeof authorMachine>>;
+      collections: Array<ActorRefFrom<typeof collectionMachine>>;
     },
     events: {} as
       | { type: "quote.new.open" }
@@ -143,12 +191,13 @@ const appMachine = setup({
       | {
           type: "author.new.submit";
           fullname: string;
-          birthday: string;
+          birthday: string | undefined;
         },
   },
   actors: {
     authorMachine,
     quoteMachine,
+    collectionMachine,
     getInitialData: fromPromise<
       Result<
         {
@@ -184,7 +233,7 @@ const appMachine = setup({
             id: "1",
             author_id: "1",
             text: "State machines rock!!!",
-            collections_id: null,
+            collections_id: "1",
             created_at: "2024-03-29T09:55:30.816Z",
           },
           {
@@ -198,7 +247,7 @@ const appMachine = setup({
             id: "3",
             author_id: "1",
             text: "XState is for big applications. XState is for small websites.",
-            collections_id: null,
+            collections_id: "1",
             created_at: "2024-03-29T09:57:30.816Z",
           },
           {
@@ -209,7 +258,13 @@ const appMachine = setup({
             created_at: "2024-03-29T09:58:30.816Z",
           },
         ],
-        collections: [],
+        collections: [
+          {
+            id: "1",
+            name: "The best collection ever",
+            parent_id: null,
+          },
+        ],
       });
     }),
     saveNewQuote: fromPromise<undefined, QuoteDto>(async () => {
@@ -224,6 +279,7 @@ const appMachine = setup({
   context: {
     authors: [],
     quotes: [],
+    collections: [],
   },
   initial: "Loading initial data",
   states: {
@@ -249,6 +305,13 @@ const appMachine = setup({
                   id: getQuoteActorId(quote.id),
                   input: quote,
                   systemId: getQuoteActorId(quote.id),
+                })
+              ),
+              collections: event.output.val.collections.map((collection) =>
+                spawn("collectionMachine", {
+                  id: getCollectionActorId(collection.id),
+                  input: collection,
+                  systemId: getCollectionActorId(collection.id),
                 })
               ),
             };
@@ -289,7 +352,7 @@ const appMachine = setup({
                               input: {
                                 id: newAuthorId,
                                 fullname: event.fullname,
-                                birth_date: event.birthday,
+                                birth_date: event.birthday ?? null,
                               },
                               systemId: getAuthorActorId(newAuthorId),
                             })
@@ -442,7 +505,11 @@ function App() {
             Collections
           </h2>
 
-          <div className="overflow-y-auto space-y-2"></div>
+          <div className="overflow-y-auto space-y-2">
+            {snapshot.context.collections.map((collection) => (
+              <CollectionItem key={collection.id} actorRef={collection} />
+            ))}
+          </div>
         </div>
       </div>
     </div>
@@ -467,6 +534,17 @@ function QuoteItem({
     (state) => state
   );
 
+  const relatedCollectionActorRef =
+    snapshot.context.collections_id === null
+      ? undefined
+      : (actorRef.system.get(
+          getCollectionActorId(snapshot.context.collections_id)
+        ) as ActorRefFrom<typeof collectionMachine> | undefined);
+  const relatedCollectionState = useSelector(
+    relatedCollectionActorRef,
+    (state) => state
+  );
+
   return (
     <CardItem>
       {snapshot.matches("Idle") === true ? (
@@ -475,11 +553,19 @@ function QuoteItem({
             {snapshot.context.text}
           </p>
 
-          <div className="grid grid-cols-[1fr,auto] gap-x-2">
-            <p className="text-gray-600 text-sm">
-              {relatedAuthorState?.context.fullname ?? "-"}
-            </p>
+          <p className="text-gray-600 text-sm mb-2">
+            {relatedAuthorState?.context.fullname ?? "-"}{" "}
+            {relatedCollectionState === undefined ? null : (
+              <>
+                {" • Belongs to "}{" "}
+                <span className="italic">
+                  {relatedCollectionState.context.name}
+                </span>{" "}
+              </>
+            )}
+          </p>
 
+          <div className="flex justify-end gap-x-2">
             <button
               className="text-green-800 text-sm font-semibold"
               onClick={() => {
@@ -909,6 +995,94 @@ function AuthorNewItemEditor({
         </div>
       )}
     </CardItem>
+  );
+}
+
+function CollectionItem({
+  actorRef,
+}: {
+  actorRef: ActorRefFrom<typeof collectionMachine>;
+}) {
+  const snapshot = useSelector(actorRef, (state) => state);
+
+  return (
+    <CardItem>
+      {snapshot.matches("Idle") === true ? (
+        <>
+          <p className="mb-2 text-gray-900">{snapshot.context.name}</p>
+
+          <div className="flex justify-end gap-x-2">
+            <button
+              className="text-green-800 text-sm font-semibold"
+              onClick={() => {
+                actorRef.send({
+                  type: "editing.start",
+                });
+              }}
+            >
+              Edit
+            </button>
+          </div>
+        </>
+      ) : (
+        <CollectionItemEditor
+          actorRef={actorRef}
+          defaultName={snapshot.context.name}
+        />
+      )}
+    </CardItem>
+  );
+}
+
+function CollectionItemEditor({
+  actorRef,
+  defaultName,
+}: {
+  actorRef: ActorRefFrom<typeof collectionMachine>;
+  defaultName: string;
+}) {
+  return (
+    <form
+      onSubmit={(event) => {
+        event.preventDefault();
+
+        const formData = new FormData(event.currentTarget);
+
+        const name = formData.get("name");
+        invariant(typeof name === "string");
+
+        actorRef.send({
+          type: "editing.submit",
+          name,
+        });
+      }}
+    >
+      <input
+        type="text"
+        name="name"
+        required
+        defaultValue={defaultName}
+        className="border border-green-600 px-1 py-0.5 rounded mb-4 text-gray-900 w-full"
+      />
+
+      <div className="flex justify-end gap-x-4">
+        <button
+          type="button"
+          className="text-green-800 text-sm font-semibold"
+          onClick={() => {
+            actorRef.send({
+              type: "editing.cancel",
+            });
+          }}
+        >
+          Cancel
+        </button>
+
+        <button type="submit" className="text-green-800 text-sm font-semibold">
+          Submit
+        </button>
+      </div>
+    </form>
   );
 }
 
