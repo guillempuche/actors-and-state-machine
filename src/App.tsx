@@ -365,12 +365,11 @@ function QuoteItemEditor({
         className="mb-4 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600 sm:text-sm sm:leading-6"
       >
         {allAuthorRefs.map((authorRef) => {
-          const snapshot = authorRef.getSnapshot();
-
           return (
-            <option key={authorRef.id} value={snapshot.context.id}>
-              {snapshot.context.fullname}
-            </option>
+            <QuoteItemEditorAuthorOption
+              key={authorRef.id}
+              authorRef={authorRef}
+            />
           );
         })}
       </select>
@@ -394,6 +393,20 @@ function QuoteItemEditor({
       </div>
     </form>
   );
+}
+
+function QuoteItemEditorAuthorOption({
+  authorRef,
+}: {
+  authorRef: ActorRefFrom<typeof authorMachine>;
+}) {
+  const authorId = useSelector(authorRef, (state) => state.context.id);
+  const authorFullname = useSelector(
+    authorRef,
+    (state) => state.context.fullname
+  );
+
+  return <option value={authorId}>{authorFullname}</option>;
 }
 
 function CardItem({ children }: { children: React.ReactNode }) {
