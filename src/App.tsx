@@ -97,6 +97,7 @@ const quoteMachine = setup({
           type: "editing.submit";
           authorId: string;
           text: string;
+          collectionId: string | undefined;
         },
   },
 }).createMachine({
@@ -121,6 +122,7 @@ const quoteMachine = setup({
           actions: assign({
             author_id: ({ event }) => event.authorId,
             text: ({ event }) => event.text,
+            collections_id: ({ event }) => event.collectionId ?? null,
           }),
         },
       },
@@ -583,6 +585,7 @@ function QuoteItem({
           actorRef={actorRef}
           defaultText={snapshot.context.text}
           defaultAuthor={snapshot.context.author_id ?? undefined}
+          defaultCollection={snapshot.context.collections_id ?? undefined}
         />
       )}
     </CardItem>
@@ -593,10 +596,12 @@ function QuoteItemEditor({
   actorRef,
   defaultText,
   defaultAuthor,
+  defaultCollection,
 }: {
   actorRef: ActorRefFrom<typeof quoteMachine>;
   defaultText: string;
   defaultAuthor: string | undefined;
+  defaultCollection: string | undefined;
 }) {
   const appActorRef = actorRef.system.get("App") as ActorRefFrom<
     typeof appMachine
@@ -604,6 +609,10 @@ function QuoteItemEditor({
   const allAuthorRefs = useSelector(
     appActorRef,
     (state) => state.context.authors
+  );
+  const allCollectionRefs = useSelector(
+    appActorRef,
+    (state) => state.context.collections
   );
 
   return (
@@ -619,10 +628,14 @@ function QuoteItemEditor({
         const text = formData.get("text");
         invariant(typeof text === "string");
 
+        const collectionId = formData.get("collection");
+        invariant(typeof collectionId === "string");
+
         actorRef.send({
           type: "editing.submit",
           authorId,
           text,
+          collectionId: collectionId === "" ? undefined : collectionId,
         });
       }}
     >
@@ -643,6 +656,23 @@ function QuoteItemEditor({
             <QuoteItemEditorAuthorOption
               key={authorRef.id}
               authorRef={authorRef}
+            />
+          );
+        })}
+      </select>
+
+      <select
+        name="collection"
+        defaultValue={defaultCollection}
+        className="mb-4 block w-full rounded-md border-0 py-1.5 pl-3 pr-10 text-gray-900 ring-1 ring-inset ring-gray-300 focus:ring-2 focus:ring-indigo-600 sm:text-sm sm:leading-6"
+      >
+        <option value="">None</option>
+
+        {allCollectionRefs.map((collectionRef) => {
+          return (
+            <QuoteItemEditorCollectionOption
+              key={collectionRef.id}
+              collectionRef={collectionRef}
             />
           );
         })}
@@ -786,6 +816,20 @@ function QuoteItemEditorAuthorOption({
   );
 
   return <option value={authorId}>{authorFullname}</option>;
+}
+
+function QuoteItemEditorCollectionOption({
+  collectionRef,
+}: {
+  collectionRef: ActorRefFrom<typeof collectionMachine>;
+}) {
+  const collectionId = useSelector(collectionRef, (state) => state.context.id);
+  const collectionName = useSelector(
+    collectionRef,
+    (state) => state.context.name
+  );
+
+  return <option value={collectionId}>{collectionName}</option>;
 }
 
 function AuthorItem({
