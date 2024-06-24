@@ -1,7 +1,3 @@
-Certainly! Here's the updated README format with the explanation for `ts-result` and `@statelyai/inspect`.
-
----
-
 # React app using actor models and state machines from XState library
 
 <img width="600" alt="React app" src="https://github.com/guillempuche/actors-and-state-machine/assets/3519924/0bbd104c-7fcc-4791-bd23-f4313b7c0a58">
